@@ -41,21 +41,20 @@ class BackgroundGenerator:
                                             [self.exp_data['log10(E/GeV)'].max()*1.01,]])
                 
         # Build the histogram we'll use for pdf evaluation
-        weights = np.ones(len(self.exp_data)) / len(self.exp_data)
         self.pdf_histogram, _, _ = np.histogram2d(self.exp_data['log10(E/GeV)'],
                                                   sindec,
-                                                  weights = weights,
                                                   bins=(self.loge_bins,
                                                         self.sindec_bins),
                                                   density=False
                                                   )
         if floor is None:
             floor = 1.0/len(self.exp_data)
-        
+        else: floor = 0
         self.pdf_histogram[self.pdf_histogram==0] = floor
+        self.pdf_histogram /= self.pdf_histogram.sum()
         
         # Scale to make the histogram into a pdf
-        phase = np.diff(self.loge_bins)[:,None] * 2*np.pi * np.diff(self.sindec_bins)[None,:]
+        phase = np.diff(self.loge_bins)[:,None] * np.diff(self.sindec_bins)[None,:]
         self.pdf_histogram /= phase
         
         #x = (self.loge_bins[:-1] + self.loge_bins[1:])/2.

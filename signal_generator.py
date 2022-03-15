@@ -9,52 +9,12 @@ from scipy.special import logsumexp
 import numba
 import utils
 
-@numba.njit(cache=True, fastmath=True)
-def logaddexp(a, b):
-    if b == -np.inf: return a
-    if a == -np.inf: return b
-    if b-a > 3: return b
-    if a-b > 3: return a
-    m = max(a,b)
-    return np.log(np.exp(a-m)+np.exp(b-m))
-    
-@numba.njit(cache=True, fastmath=True, parallel=True)
-def histogram3d(values, loge_bins, sigma_bins, psf_bins, weights):
-    hist = np.ones((len(loge_bins), len(sigma_bins), len(psf_bins))) * -np.inf
-    shape = hist.shape
-    
-    for m in range(values.shape[1]):
-        a = np.searchsorted(loge_bins, values[0,m], side='right')-1
-        b = np.searchsorted(sigma_bins, values[1,m], side='right')-1
-        c = np.searchsorted(psf_bins, values[2,m], side='right')-1
-        hist[a,b,c] = logaddexp(hist[a,b,c], weights[m])
-
-    #dloge = np.log(np.diff(loge_bins))
-    #dsigm = np.log(2*np.pi * -np.diff(np.cos(sigma_bins)))
-    #dpsf = np.log(2*np.pi * -np.diff(np.cos(psf_bins)))
-            
-    for i in range(1, shape[0]):
-        for j in numba.prange(shape[1]):
-            for k in numba.prange(shape[2]):
-                hist[i,j,k] = logaddexp(hist[i,j,k], hist[i-1,j,k])
-    for i in numba.prange(shape[0]):
-        for j in range(1, shape[1]):
-            for k in numba.prange(shape[2]):
-                hist[i,j,k] = logaddexp(hist[i,j,k], hist[i,j-1,k])
-        for j in numba.prange(shape[1]):
-            for k in range(1, shape[2]):
-                hist[i,j,k] = logaddexp(hist[i,j,k], hist[i,j,k-1])
-                    
-    return np.exp(hist)
-
-
-
 @numba.njit(cache=True)
 def get_llh(loge, logemin, logemax,
             sigma, sigmamin, sigmamax,
             psi, psimin, psimax,
             llh_values):
-    output = np.full_like(loge, -np.inf)
+    output = np.full(len(loge), -np.inf)
 
     for j in range(len(loge)):
         for i in range(len(logemin)):
@@ -108,7 +68,7 @@ class SignalGenerator:
             smearing['PSF_max[deg]'] *= angular_resolution_scale
         smearing['E_nu/GeV_min'] = 10**smearing['log10(E_nu/GeV)_min']
         smearing['E_nu/GeV_max'] = 10**smearing['log10(E_nu/GeV)_max']
-        smearing = smearing.drop(labels=['log10(E_nu/GeV)_min','log10(E_nu/GeV)_max'], axis=1)
+        self.smearing = smearing.drop(labels=['log10(E_nu/GeV)_min','log10(E_nu/GeV)_max'], axis=1)
         
         # Add a column corresponding to the bin phase space
         logphase = np.log(smearing['log10(E/GeV)_max'] - smearing['log10(E/GeV)_min'])
@@ -116,10 +76,9 @@ class SignalGenerator:
                                                  - np.cos(np.radians(smearing['AngErr_max[deg]'])))))
         logphase = np.logaddexp(logphase, np.log(2*np.pi*(np.cos(np.radians(smearing['PSF_min[deg]']))
                                                  - np.cos(np.radians(smearing['PSF_max[deg]'])))))
-        smearing['log_phase_space'] = logphase
+        self.smearing['log_phase_space'] = logphase
         
-        self.transfer = smearing.groupby(['Dec_nu_min[deg]', 'Dec_nu_max[deg]'])
-        del smearing
+        self.transfer = self.smearing.groupby(['Dec_nu_min[deg]', 'Dec_nu_max[deg]'])
 
         return
 
@@ -279,7 +238,6 @@ class SignalGenerator:
         sigma = self._sample_uniform(transfer['AngErr_min[deg]'], 
                                      transfer['AngErr_max[deg]'],
                                      N_observed)
-        sigma = np.radians(sigma)
 
         # And the harder part: generating reco RA/dec values...
         psi = self._sample_uniform(transfer['PSF_min[deg]'], 
@@ -288,13 +246,14 @@ class SignalGenerator:
         ra, dec = self.create_ra_dec(np.radians(psi),
                                      np.radians(right_ascension_deg),
                                      np.radians(declination_deg))
-        return pd.DataFrame({"ra":ra, "dec":dec, "sigma":sigma, "logE":logE})
+        return pd.DataFrame({"ra":ra, "dec":dec, 
+                             "sigma":np.radians(sigma), 
+                             "logE":logE})
 
     def pdf_pointsource(self, 
-                        events,
-                        declination_deg, right_ascension_deg,
-                        integral_flux_function,
-                        new=False):
+                    events,
+                    declination_deg, right_ascension_deg,
+                    integral_flux_function):
         """
         Calculate a signal likelihood for a given set of events using energy, 
         estimated angular uncertainty, and angular distance.
@@ -322,45 +281,28 @@ class SignalGenerator:
         dist = utils.ang_dist(np.radians(right_ascension_deg),
                               np.radians(declination_deg),
                               events['ra'], events['dec'])
-        dist = np.degrees(dist)
 
         # Our full likelihood space is defined by the signal expectations
         # assuming our given flux model
         transfer, N_expected = self.get_expectations(declination_deg, 
                                                      right_ascension_deg,
                                                      integral_flux_function)
-        
+
         # Calculate the phase space. We'll need these
         # Query is picky. Temp rename columns
         transfer_pdf = np.log(N_expected.values/N_expected.sum())
-
-        # Gather values from the transfer matrix
-        loge = np.concatenate([transfer['log10(E/GeV)_min'], transfer['log10(E/GeV)_max']])
-        loge_bins = np.unique(loge)
-        sigma = np.concatenate([transfer['AngErr_min[deg]'], transfer['AngErr_max[deg]']])
-        sigma_bins = np.unique(sigma)
-        psf = np.concatenate([transfer['PSF_min[deg]'], transfer['PSF_max[deg]']])
-        psf_bins = np.unique(psf)
-
-        # Histogram them
-        values = np.array([loge, sigma, psf])
-        weights = np.concatenate([transfer_pdf, -transfer_pdf])
-        hist = histogram3d(values, loge_bins, sigma_bins, psf_bins, weights)
-        
-        phase = (np.diff(loge_bins)[:,None,None]
-                 * -2*np.pi * np.diff(np.cos(np.radians(sigma_bins)))[None,:,None]
-                 * -2*np.pi * np.diff(np.cos(np.radians(psf_bins)))[None,None,:])
-        print(np.diff(loge_bins))
-        print(-2*np.pi * np.diff(np.cos(np.radians(sigma_bins))))
-        print(-2*np.pi * np.diff(np.cos(np.radians(psf_bins))))
-        hist[:-1,:-1,:-1] *= phase
-
-        # And the lookups.
-        loge_i = np.searchsorted(loge_bins, events.logE.values, side='right')-1
-        sigma_i = np.searchsorted(sigma_bins, np.degrees(events.sigma.values), side='right')-1
-        psf_i = np.searchsorted(psf_bins, dist.values, side='right')-1
-
-        return hist[loge_i, sigma_i, psf_i]
+        transfer_pdf -= transfer['log_phase_space'].values
+        llh = get_llh(events.logE.values, 
+                      np.array(transfer['log10(E/GeV)_min']), 
+                      np.array(transfer['log10(E/GeV)_max']),
+                      np.degrees(events.sigma.values), 
+                      np.array(transfer['AngErr_min[deg]']), 
+                      np.array(transfer['AngErr_max[deg]']),
+                      np.degrees(dist.values), 
+                      np.array(transfer['PSF_min[deg]']), 
+                      np.array(transfer['PSF_max[deg]']),
+                      transfer_pdf)
+        return np.exp(llh)
     
     def generate_diffuse(self, 
                          integral_flux_function):
