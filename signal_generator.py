@@ -69,6 +69,7 @@ class SignalGenerator:
         smearing['E_nu/GeV_min'] = 10**smearing['log10(E_nu/GeV)_min']
         smearing['E_nu/GeV_max'] = 10**smearing['log10(E_nu/GeV)_max']
         self.smearing = smearing.drop(labels=['log10(E_nu/GeV)_min','log10(E_nu/GeV)_max'], axis=1)
+        self.smearing = self.smearing[self.smearing['Fractional_Counts']>0]
         
         # Add a column corresponding to the bin phase space
         logphase = np.log(smearing['log10(E/GeV)_max'] - smearing['log10(E/GeV)_min'])
@@ -137,23 +138,21 @@ class SignalGenerator:
              function signature
                 f(energy_min, energy_max) --> ndarray[float]
              with output fluxes in units of 1/cm2/s
- 
+
         Returns:
            Transfer matrix with `N_expected` column giving the number of events
            expected from this flux.
         """        
-        # Get the total expected number of events
-        # Loop until we get the right one, then stop the loop
-        for dec_bin, exposure in self.exposure:
-            if (dec_bin[0] <= declination_deg) & (declination_deg < dec_bin[1]):
-                break
-                        
-        # Next step: divide the total up to per reco bin
-        # Loop until we get the right one, then stop the loop
-        for dec_bin, transfer in self.transfer:
-            if (dec_bin[0] <= declination_deg) & (declination_deg < dec_bin[1]):
-                break
-                                
+        # Find the correct exposure group by dec
+        deckeys = np.array(list(self.exposure.groups.keys()), dtype=float)
+        i = np.searchsorted(deckeys[:,0], declination_deg)-1
+        exposure = self.exposure.get_group(tuple(deckeys[i]))
+
+        # And the correct transfer group by dec
+        deckeys = np.array(list(self.transfer.groups.keys()), dtype=float)
+        i = np.searchsorted(deckeys[:,0], declination_deg)-1
+        transfer = self.transfer.get_group(tuple(deckeys[i]))
+
         # Correct transfer matrix bin. How many events should we generate from each bin?
         # We want to get the average exposure over this energy bin. Nominally, that's
         #   avg_exposure = \int_{emin}^{emax}(exposure dE) / \int_{emin}^{emax} dE
@@ -162,17 +161,17 @@ class SignalGenerator:
         #                    / (emax - emin))
         #   avg_exposure = 0.5 * (exposure(emax) - exposure(emin))
         # ie, we just take the averages evaluated at the transfer energy bin edges.
-        transfer_exposure = 0.5 * (np.interp(transfer['E_nu/GeV_max'], 
+        transfer_exposure = 0.5 * (np.interp(transfer['E_nu/GeV_min'].values,
                                              exposure['E_nu/GeV_max'],
                                              exposure['Exposure[cm^2 s]'])
-                                   + np.interp(transfer['E_nu/GeV_min'], 
+                                   + np.interp(transfer['E_nu/GeV_max'].values,
                                                exposure['E_nu/GeV_max'],
                                                exposure['Exposure[cm^2 s]']))
-        
+
         N_expected = (transfer_exposure * transfer['Fractional_Counts']
                       * integral_flux_function(transfer['E_nu/GeV_min'], 
                                                transfer['E_nu/GeV_max']))
-       
+
         # Drop zeros
         transfer = transfer[N_expected>0]
         N_expected = N_expected[N_expected>0]
