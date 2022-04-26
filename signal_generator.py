@@ -292,6 +292,9 @@ class SignalGenerator:
         # Query is picky. Temp rename columns
         transfer_pdf = np.log(N_expected.values/N_expected.sum())
         transfer_pdf -= transfer['log_phase_space'].values
+        
+        
+        
         llh = get_llh(events.logE.values, 
                       np.array(transfer['log10(E/GeV)_min']), 
                       np.array(transfer['log10(E/GeV)_max']),
