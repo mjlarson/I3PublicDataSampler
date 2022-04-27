@@ -8,21 +8,27 @@ from scipy.special import logsumexp
 
 import numba
 import utils
+from utils import histogram3d
 
-@numba.njit(cache=True)
 def get_llh(loge, logemin, logemax,
             sigma, sigmamin, sigmamax,
             psi, psimin, psimax,
             llh_values):
-    output = np.full(len(loge), -np.inf)
+    h, (loge_bins, sigma_bins, psi_bins) = histogram3d(logemin,
+                                                      logemax,
+                                                      sigmamin,
+                                                      sigmamax,
+                                                      psimin,
+                                                      psimax,
+                                                      llh_values)
+    ebins = np.searchsorted(loge_bins, loge, 'right')-1
+    sbins = np.searchsorted(sigma_bins, sigma, 'right')-1
+    pbins = np.searchsorted(psi_bins, psi, 'right')-1
 
-    for j in range(len(loge)):
-        for i in range(len(logemin)):
-            if ((logemin[i] <= loge[j]) & (loge[j] < logemax[i])
-                & (sigmamin[i] <= sigma[j]) & (sigma[j] < sigmamax[i])
-                & (psimin[i] <= psi[j]) & (psi[j] < psimax[i])):
-                output[j] = np.logaddexp(output[j], llh_values[i])
-    return output
+    output = np.zeros(len(loge), dtype=np.float64)
+    output += h[ebins, sbins, pbins]
+    
+    return np.log(output)
 
 class SignalGenerator:
     def __init__(self, aeff_files, smearing_files, uptime_files,
@@ -256,7 +262,6 @@ class SignalGenerator:
         """
         Calculate a signal likelihood for a given set of events using energy, 
         estimated angular uncertainty, and angular distance.
-
         Args:
           events: 
              A pandas dataframe containing events you'd like to evaluate. 
@@ -272,7 +277,6 @@ class SignalGenerator:
              function signature
                 f(energy_min, energy_max) --> ndarray[float]
              with output fluxes in units of 1/cm2/s
-
         Returns:
             A list of likelihood values for each value
         """
@@ -292,8 +296,6 @@ class SignalGenerator:
         transfer_pdf = np.log(N_expected.values/N_expected.sum())
         transfer_pdf -= transfer['log_phase_space'].values
         
-        
-        
         llh = get_llh(events.logE.values, 
                       np.array(transfer['log10(E/GeV)_min']), 
                       np.array(transfer['log10(E/GeV)_max']),
@@ -305,6 +307,7 @@ class SignalGenerator:
                       np.array(transfer['PSF_max[deg]']),
                       transfer_pdf)
         return np.exp(llh)
+
     
     def generate_diffuse(self, 
                          integral_flux_function):
