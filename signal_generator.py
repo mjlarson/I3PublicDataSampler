@@ -21,12 +21,19 @@ def get_llh(loge, logemin, logemax,
                                                       psimin,
                                                       psimax,
                                                       llh_values)
-    ebins = np.searchsorted(loge_bins, loge, 'right')-1
-    sbins = np.searchsorted(sigma_bins, sigma, 'right')-1
-    pbins = np.searchsorted(psi_bins, psi, 'right')-1
+    h /= h.sum()
+    h /= (np.diff(loge_bins)[:, None, None]
+          * np.diff(sigma_bins)[None, :, None]
+          * np.diff(psi_bins)[None, None, :])
+    
+    ebins = np.searchsorted(loge_bins, loge,)
+    sbins = np.searchsorted(sigma_bins, sigma,)
+    pbins = np.searchsorted(psi_bins, psi,)
 
     output = np.zeros(len(loge), dtype=np.float64)
-    output += h[ebins, sbins, pbins]
+    output += h[np.clip(ebins, 1, len(loge_bins))-1, 
+                np.clip(sbins, 1, len(sigma_bins))-1,
+                np.clip(pbins, 1, len(psi_bins))-1]
     
     return np.log(output)
 
@@ -80,9 +87,9 @@ class SignalGenerator:
         # Add a column corresponding to the bin phase space
         logphase = np.log(smearing['log10(E/GeV)_max'] - smearing['log10(E/GeV)_min'])
         logphase = np.logaddexp(logphase, np.log(2*np.pi*(np.cos(np.radians(smearing['AngErr_min[deg]'])) 
-                                                 - np.cos(np.radians(smearing['AngErr_max[deg]'])))))
+                                                        - np.cos(np.radians(smearing['AngErr_max[deg]'])))))
         logphase = np.logaddexp(logphase, np.log(2*np.pi*(np.cos(np.radians(smearing['PSF_min[deg]']))
-                                                 - np.cos(np.radians(smearing['PSF_max[deg]'])))))
+                                                        - np.cos(np.radians(smearing['PSF_max[deg]'])))))
         self.smearing['log_phase_space'] = logphase
         
         self.transfer = self.smearing.groupby(['Dec_nu_min[deg]', 'Dec_nu_max[deg]'])
@@ -294,15 +301,15 @@ class SignalGenerator:
         # Calculate the phase space. We'll need these
         # Query is picky. Temp rename columns
         transfer_pdf = np.log(N_expected.values/N_expected.sum())
-        transfer_pdf -= transfer['log_phase_space'].values
+        #transfer_pdf -= transfer['log_phase_space'].values
         
-        llh = get_llh(events.logE.values, 
+        llh = get_llh(events['logE'], 
                       np.array(transfer['log10(E/GeV)_min']), 
                       np.array(transfer['log10(E/GeV)_max']),
-                      np.degrees(events.sigma.values), 
+                      np.degrees(events['sigma']), 
                       np.array(transfer['AngErr_min[deg]']), 
                       np.array(transfer['AngErr_max[deg]']),
-                      np.degrees(dist.values), 
+                      np.degrees(dist), 
                       np.array(transfer['PSF_min[deg]']), 
                       np.array(transfer['PSF_max[deg]']),
                       transfer_pdf)

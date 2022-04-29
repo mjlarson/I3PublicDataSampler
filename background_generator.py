@@ -7,16 +7,13 @@ from scipy.special import logsumexp
 import utils
 
 class BackgroundGenerator:
-    def __init__(self, data_files, floor=None):
+    def __init__(self, data_files):
         """
         Class to generate signal events from IceCube's data release files
 
         Args:
           data_files: A list of files giving events corresponding to one continuous 
               period of datataking (eg, IC86-II+).
-          floor: If given, use this number as the minimum for the background histogram
-              used to build the pdf. Otherwise, set the minimum counts per bin to 
-              1/len(data).
         """
         self.logger = logging.Logger("BackgroundGenerator")
         
@@ -45,22 +42,8 @@ class BackgroundGenerator:
                                                   sindec,
                                                   bins=(self.loge_bins,
                                                         self.sindec_bins),
-                                                  density=False
+                                                  density=True
                                                   )
-        if floor is None:
-            floor = 1.0/len(self.exp_data)
-        else: floor = 0
-        self.pdf_histogram[self.pdf_histogram==0] = floor
-        self.pdf_histogram /= self.pdf_histogram.sum()
-        
-        # Scale to make the histogram into a pdf
-        phase = np.diff(self.loge_bins)[:,None] * np.diff(self.sindec_bins)[None,:]
-        self.pdf_histogram /= phase
-        
-        #x = (self.loge_bins[:-1] + self.loge_bins[1:])/2.
-        #y = (self.sindec_bins[:-1] + self.sindec_bins[1:])/2.
-        #self._pdf = RectBivariateSpline(x, y, self.pdf_histogram,
-        #                                kx=1, ky=1, s=0)
         return
     
     def pdf(self, loge, sindec):
