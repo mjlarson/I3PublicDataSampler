@@ -7,8 +7,8 @@ from scipy.spatial.transform import Rotation
 from scipy.special import logsumexp
 
 import numba
-import utils
-from utils import histogram3d
+from . import utils
+from .utils import histogram3d
 
 def get_llh(loge, logemin, logemax,
             sigma, sigmamin, sigmamax,

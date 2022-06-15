@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 from scipy.special import logsumexp
 
-import utils
+from . import utils
 
 class BackgroundGenerator:
     def __init__(self, data_files):
