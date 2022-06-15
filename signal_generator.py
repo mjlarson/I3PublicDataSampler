@@ -14,6 +14,7 @@ def get_llh(loge, logemin, logemax,
             sigma, sigmamin, sigmamax,
             psi, psimin, psimax,
             llh_values):
+    if len(llh_values) == 0: return 0
     h, (loge_bins, sigma_bins, psi_bins) = histogram3d(logemin,
                                                       logemax,
                                                       sigmamin,
@@ -112,6 +113,7 @@ class SignalGenerator:
           reco_ra, reco_dec: Reconstructed right ascension, declination
                for each signal event in radians
         """
+        if len(psi) == 0: return np.zeros(0), np.zeros(0)
         psi = np.atleast_1d(psi)
         src_ra = np.atleast_1d(src_ra)
         src_dec = np.atleast_1d(src_dec)    # Use the true RA and dec here to get a unit vector
@@ -404,18 +406,22 @@ class SignalGenerator:
         """
         npix = len(healpix_map)
         nside = hp.npix2nside(npix)
+        pix_area = hp.nside2pixarea(nside)
+        
         ra_deg, dec_deg = hp.pix2ang(nside, np.arange(npix), lonlat=True)
         healpix_dataframe = pd.DataFrame({'ra_deg':ra_deg, 'dec_deg':dec_deg, 'flux':healpix_map})
         del ra_deg, dec_deg
-        
         
         # Start looping over declination bands to generate events
         signal_events = []
         for dec, rows in healpix_dataframe.groupby('dec_deg'):
             total = rows['flux'].values.sum()
+            if total == 0: continue
+            if ~np.isfinite(total): continue
                     
             # Create the necessary integral flux shim function
-            temp_integral_flux_function = lambda emin, emax: integral_flux_function(total, emin, emax)
+            temp_integral_flux_function = lambda emin, emax: (pix_area * len(rows) 
+                                                              * integral_flux_function(total, emin, emax))
             
             # Generate the events with true RA = 0
             events = self.generate_pointsource(dec, 0, temp_integral_flux_function)
