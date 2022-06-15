@@ -1,6 +1,8 @@
 import numpy as np
 import healpy as hp
 import pandas as pd
+from scipy.spatial.transform import Rotation
+
 import numba
 
 def read_to_pandas(files):
@@ -117,3 +119,44 @@ def histogram3d(logemin, logemax,
              pmin[i]:pmax[i]] += probs[i]
 
     return hist, (loge_bins, sigma_bins, psi_bins)
+
+
+def rotate_to(lon, lat, ic_ra, ic_dec, time=None):
+    r"""Rotation matrix for rotation from IceCube onto (lon, lat).
+    The rotation is performed on icecube's (ra, dec) as a proxy for 
+    local coordinates (technically treated as azimiuth and co-altitude).
+    
+    Args:
+      lon, lat: longitude and latitude of the new detector to rotate to
+      ic_ra, ic_dec: RA and declination arrays of the events at IceCube.
+      time: If given, an additional time rotation will be performed before
+        returning the RA.
+      
+    Returns:
+      new_ra, new_dec: Numpy arrays giving the new RA and declination values
+        after rotation
+    """
+    def unit_vec(lon, lat):
+        return np.array([np.cos(lon)*np.cos(lat),
+                         np.sin(lon)*np.cos(lat),
+                         np.sin(lat)])
+    
+    lon_ic = np.radians(-62.6081)
+    lat_ic = np.radians(-89.9944)
+    from_vec, to_vec = unit_vec([lon_ic, lon], [lat_ic, lat]).T
+    event_vecs = unit_vec(ic_ra, ic_dec)
+    
+    axis = np.cross(from_vec, to_vec)
+    dotprod = np.dot(from_vec, to_vec)
+    costheta = np.sqrt((1-dotprod)/2)
+    sintheta = np.sqrt(1-costheta**2)
+    quaternion = np.array([axis[0]*sintheta,
+                           axis[1]*sintheta,
+                           axis[2]*sintheta,
+                           costheta]).T
+    R = Rotation.from_quat(quaternion)
+    vec = R.apply(event_vecs.T)
+    
+    new_ra = np.arctan2(vec[:, 1], vec[:, 0])
+    new_dec = np.arcsin(vec[:, 2])
+    return new_ra, new_dec
